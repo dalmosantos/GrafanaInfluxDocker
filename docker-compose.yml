@@ -1,23 +1,71 @@
-version: '3.2'
-
-services:
-  influxdb:
-    build: influxdb
-    env_file: configuration.env
-    ports:
-      - '8086:8086'
-    volumes:
-      - influxdb_data:/var/lib/influxdb
-  grafana:
-    build: grafana
-    env_file: configuration.env
-    links:
-      - influxdb
-    ports:
-      - '3000:3000'
-    volumes:
-      - grafana_data:/var/lib/grafana
+version: '3'
 
 volumes:
   grafana_data: {}
   influxdb_data: {}
+  chronograf_data: {}
+
+networks:
+  monitor-net:
+    driver: bridge
+
+services:
+
+  nginx:
+    image: nginx:1.17.6-alpine
+    container_name: nginx
+    restart: unless-stopped
+    tty: true
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - ./nginx/conf.d/:/etc/nginx/conf.d/
+      - ./nginx/ssl/:/etc/nginx/ssl/
+    networks:
+      - monitor-net
+  influxdb:
+    image: influxdb:1.7-alpine
+    ports:
+      - '8086:8086'
+    volumes:
+      - influxdb_data:/var/lib/influxdb
+    environment:
+      - INFLUXDB_DB=db0
+      - INFLUXDB_ADMIN_USER=${INFLUXDB_USERNAME}
+      - INFLUXDB_ADMIN_PASSWORD=${INFLUXDB_PASSWORD}
+    networks:
+      - monitor-net
+  chronograf:
+    image: chronograf:1.7.16-alpine
+    ports:
+      - '127.0.0.1:8888:8888'
+    volumes:
+      - chronograf_data:/var/lib/chronograf
+    depends_on:
+      - influxdb
+    environment:
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_USERNAME=${INFLUXDB_USERNAME}
+      - INFLUXDB_PASSWORD=${INFLUXDB_PASSWORD}
+    networks:
+      - monitor-net
+  grafana:
+    image: grafana/grafana:6.5.2
+    container_name: grafana
+    restart: always
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_USER=${ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      - GF_SERVER_ROOT_URL=http://grafana/grafana
+    ports:
+      - 3000:3000
+    networks:
+      - monitor-net
+    depends_on:
+      - nginx
+      - influxdb
